@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Local configuration
+.env
+
+# Databases and generated artifacts
+*.db
+*.sqlite
+*.sqlite3
+data/*.db
+artifacts/models/
+*.joblib
+
+# macOS / editors
+.DS_Store
+.vscode/
+.idea/

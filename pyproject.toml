@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nba-scoring-model"
+version = "1.0.0"
+description = "NBA player stat prediction project using Python, SQLAlchemy, and scikit-learn."
+requires-python = ">=3.11"
+dependencies = [
+  "joblib>=1.4,<2",
+  "numpy>=2.0,<3",
+  "pandas>=2.2,<4",
+  "requests>=2.32,<3",
+  "scikit-learn>=1.6,<2",
+  "SQLAlchemy>=2.0,<3",
+]
+
+[tool.setuptools.packages.find]
+include = ["nba_scoring_model*"]
