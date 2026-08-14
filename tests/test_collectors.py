@@ -9,13 +9,82 @@ def test_extract_historical_game_ids(tmp_path):
         def get_json(self, url, params=None):
             return {
                 "events": [
-                    {"id": "401000001", "season": {"type": 2}},
-                    {"id": "401000002", "season": {"type": 2}},
+                    {
+                        "id": "401000001",
+                        "season": {"type": 2},
+                        "competitions": [
+                            {
+                                "status": {"type": {"completed": True}},
+                                "type": {"abbreviation": "STD"},
+                                "competitors": [
+                                    {"team": {"id": "1"}},
+                                    {"team": {"id": "2"}},
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "401000002",
+                        "season": {"type": 2},
+                        "competitions": [
+                            {
+                                "status": {"type": {"completed": True}},
+                                "type": {"abbreviation": "STD"},
+                                "competitors": [
+                                    {"team": {"id": "3"}},
+                                    {"team": {"id": "4"}},
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "postponed",
+                        "season": {"type": 2},
+                        "competitions": [
+                            {
+                                "status": {"type": {"completed": False}},
+                                "type": {"abbreviation": "STD"},
+                                "competitors": [
+                                    {"team": {"id": "5"}},
+                                    {"team": {"id": "6"}},
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "cup-final",
+                        "season": {"type": 2},
+                        "competitions": [
+                            {
+                                "status": {"type": {"completed": True}},
+                                "type": {"abbreviation": "CC"},
+                                "competitors": [
+                                    {"team": {"id": "18"}},
+                                    {"team": {"id": "24"}},
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "id": "all-star",
+                        "season": {"type": 2},
+                        "competitions": [
+                            {
+                                "status": {"type": {"completed": True}},
+                                "type": {"abbreviation": "STD"},
+                                "competitors": [
+                                    {"team": {"id": "132374"}},
+                                    {"team": {"id": "111386"}},
+                                ],
+                            }
+                        ],
+                    },
                 ]
             }
 
     db = DatabaseManager(f"sqlite:///{tmp_path / 'test.db'}")
     collector = NBADataCollector(FakeClient(), db, "scoreboard", "summary")
+
     game_ids = collector.fetch_historical_game_ids(
         "2025-26",
         date_from="10/21/2025",

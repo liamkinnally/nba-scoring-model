@@ -43,6 +43,7 @@ class NBADataCollector:
     ) -> List[str]:
         start, end = self._season_date_range(season, season_type, date_from, date_to)
         expected_type = self._espn_season_type(season_type)
+        nba_team_ids = {str(i) for i in range(1, 31)}
 
         game_ids: List[str] = []
         seen = set()
@@ -56,8 +57,37 @@ class NBADataCollector:
 
             for event in payload.get("events", []):
                 event_type = event.get("season", {}).get("type")
-                if expected_type is not None and event_type is not None and event_type != expected_type:
+                if (
+                    expected_type is not None
+                    and event_type is not None
+                    and event_type != expected_type
+                ):
                     continue
+
+                competitions = event.get("competitions") or []
+                if not competitions:
+                    continue
+
+                competition = competitions[0]
+
+                status = competition.get("status", {}).get("type", {})
+                if not status.get("completed", False):
+                    continue
+
+                if season_type == "Regular Season":
+                    competition_type = competition.get("type", {}).get("abbreviation")
+                    if competition_type == "CC":
+                        continue
+
+                    competitors = competition.get("competitors") or []
+                    team_ids = {
+                        str(item.get("team", {}).get("id"))
+                        for item in competitors
+                        if item.get("team", {}).get("id") is not None
+                    }
+
+                    if len(team_ids) != 2 or not team_ids.issubset(nba_team_ids):
+                        continue
 
                 game_id = str(event.get("id") or "")
                 if game_id and game_id not in seen:

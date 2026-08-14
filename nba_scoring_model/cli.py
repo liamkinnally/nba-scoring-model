@@ -8,6 +8,7 @@ from nba_scoring_model import config
 from nba_scoring_model.data.database import DatabaseManager
 from nba_scoring_model.data.demo import seed_demo_database
 from nba_scoring_model.modeling.trainer import ModelTrainer
+from nba_scoring_model.modeling.evaluation import evaluate_recent_average_baselines
 
 
 def parse_date(value: str) -> datetime:
@@ -70,6 +71,11 @@ def main():
     train.add_argument("--end", required=True, type=parse_date)
     train.add_argument("--no-tune", action="store_true")
 
+    evaluate_baselines = subparsers.add_parser("evaluate-baselines")
+    evaluate_baselines.add_argument("--database-url", default=config.DATABASE_URL)
+    evaluate_baselines.add_argument("--start", required=True, type=parse_date)
+    evaluate_baselines.add_argument("--end", required=True, type=parse_date)
+
     args = parser.parse_args()
 
     if args.command == "demo":
@@ -95,6 +101,14 @@ def main():
             date_from=nba_date(args.start),
             date_to=nba_date(args.end),
             limit=args.limit,
+        )
+
+    elif args.command == "evaluate-baselines":
+        db = DatabaseManager(args.database_url)
+        output = evaluate_recent_average_baselines(
+            db,
+            args.start,
+            args.end,
         )
 
     else:

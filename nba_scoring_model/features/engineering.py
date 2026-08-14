@@ -46,7 +46,13 @@ class FeatureEngineer:
             features: Dict[str, float] = {
                 "is_home_game": float(team_id == game.home_team_id),
                 "vegas_total": float(game.vegas_total) if game.vegas_total is not None else np.nan,
-                "vegas_spread": float(game.vegas_spread) if game.vegas_spread is not None else np.nan,
+                "vegas_spread": (
+                    float(game.vegas_spread)
+                    if team_id == game.home_team_id
+                    else -float(game.vegas_spread)
+                )
+                if game.vegas_spread is not None
+                else np.nan,
             }
             features.update(self._player_form(session, player_id, game.date))
             features.update(self._opponent_history(session, player_id, opponent_id, game.date))

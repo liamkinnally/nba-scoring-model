@@ -124,7 +124,7 @@ class PlayerStatModel:
     def _base_pipeline(self) -> Pipeline:
         return Pipeline(
             [
-                ("imputer", SimpleImputer(strategy="median")),
+                ("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
                 ("model", GradientBoostingRegressor(random_state=42)),
             ]
         )
