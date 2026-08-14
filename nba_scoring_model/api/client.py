@@ -9,7 +9,7 @@ from urllib3.util.retry import Retry
 
 
 class RateLimiter:
-    def __init__(self, calls: int = 20, period_seconds: float = 60.0):
+    def __init__(self, calls: int = 60, period_seconds: float = 60.0):
         if calls <= 0 or period_seconds <= 0:
             raise ValueError("calls and period_seconds must be positive")
         self.calls = calls
@@ -37,8 +37,8 @@ class RateLimiter:
 class JSONAPIClient:
     def __init__(
         self,
-        calls_per_minute: int = 20,
-        timeout_seconds: float = 30.0,
+        calls_per_minute: int = 60,
+        timeout_seconds: float = 15.0,
         headers: Optional[Mapping[str, str]] = None,
     ):
         self.timeout_seconds = timeout_seconds
@@ -46,20 +46,17 @@ class JSONAPIClient:
         self.session = requests.Session()
         self.session.headers.update(
             {
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/145.0.0.0 Safari/537.36",
                 "Accept": "application/json, text/plain, */*",
-                "Referer": "https://www.nba.com/",
-                "Origin": "https://www.nba.com",
                 **dict(headers or {}),
             }
         )
 
         retry = Retry(
-            total=3,
-            connect=3,
-            read=3,
-            status=3,
-            backoff_factor=0.75,
+            total=2,
+            connect=2,
+            read=2,
+            status=2,
+            backoff_factor=0.5,
             status_forcelist=(429, 500, 502, 503, 504),
             allowed_methods=frozenset({"GET"}),
             respect_retry_after_header=True,

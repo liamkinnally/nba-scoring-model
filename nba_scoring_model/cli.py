@@ -30,9 +30,8 @@ def make_collector(database_url: str):
     collector = NBADataCollector(
         client,
         db,
-        config.NBA_SCOREBOARD_URL,
-        config.NBA_BOXSCORE_URL_TEMPLATE,
-        config.NBA_LEAGUE_GAME_LOG_URL,
+        config.ESPN_SCOREBOARD_URL,
+        config.ESPN_SUMMARY_URL,
     )
     return db, collector
 

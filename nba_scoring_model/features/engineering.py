@@ -60,7 +60,7 @@ class FeatureEngineer:
             session.execute(
                 select(PlayerGameStats, Game)
                 .join(Game, PlayerGameStats.game_id == Game.game_id)
-                .where(PlayerGameStats.player_id == player_id, Game.date < as_of)
+                .where(PlayerGameStats.player_id == player_id, PlayerGameStats.minutes_played > 0, Game.date < as_of)
                 .order_by(Game.date.desc())
             ).all()
         )
@@ -95,7 +95,7 @@ class FeatureEngineer:
                 select(PlayerGameStats, Game)
                 .join(Game, PlayerGameStats.game_id == Game.game_id)
                 .where(
-                    PlayerGameStats.player_id == player_id,
+                    PlayerGameStats.player_id == player_id, PlayerGameStats.minutes_played > 0,
                     Game.date < as_of,
                     or_(Game.home_team_id == opponent_id, Game.away_team_id == opponent_id),
                 )
@@ -161,7 +161,7 @@ class FeatureEngineer:
         prev_date = session.scalar(
             select(Game.date)
             .join(PlayerGameStats, PlayerGameStats.game_id == Game.game_id)
-            .where(PlayerGameStats.player_id == player_id, Game.date < as_of)
+            .where(PlayerGameStats.player_id == player_id, PlayerGameStats.minutes_played > 0, Game.date < as_of)
             .order_by(Game.date.desc())
             .limit(1)
         )

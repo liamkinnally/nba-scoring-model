@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -15,23 +15,23 @@ class NBADataCollector:
         client: JSONAPIClient,
         db_manager: DatabaseManager,
         scoreboard_url: str,
-        boxscore_url_template: str,
-        league_game_log_url: str,
+        summary_url: str,
     ):
         self.client = client
         self.db_manager = db_manager
         self.scoreboard_url = scoreboard_url
-        self.boxscore_url_template = boxscore_url_template
-        self.league_game_log_url = league_game_log_url
+        self.summary_url = summary_url
 
-    def fetch_scoreboard(self) -> List[Dict[str, Any]]:
-        payload = self.client.get_json(self.scoreboard_url)
-        games = payload.get("scoreboard", {}).get("games", [])
-        return [self._parse_scoreboard_game(game) for game in games]
+    def fetch_scoreboard(self, game_date: Optional[date] = None) -> List[Dict[str, Any]]:
+        params = None
+        if game_date is not None:
+            params = {"dates": game_date.strftime("%Y%m%d")}
 
-    def fetch_boxscore(self, game_id: str) -> Dict[str, Any]:
-        url = self.boxscore_url_template.format(game_id=game_id)
-        return self.client.get_json(url)
+        payload = self.client.get_json(self.scoreboard_url, params=params)
+        return [self._parse_scoreboard_event(event) for event in payload.get("events", [])]
+
+    def fetch_summary(self, game_id: str) -> Dict[str, Any]:
+        return self.client.get_json(self.summary_url, params={"event": game_id})
 
     def fetch_historical_game_ids(
         self,
@@ -39,36 +39,40 @@ class NBADataCollector:
         season_type: str = "Regular Season",
         date_from: Optional[str] = None,
         date_to: Optional[str] = None,
+        limit: Optional[int] = None,
     ) -> List[str]:
-        params = {
-            "Counter": 0,
-            "DateFrom": date_from or "",
-            "DateTo": date_to or "",
-            "Direction": "ASC",
-            "LeagueID": "00",
-            "PlayerOrTeam": "T",
-            "Season": season,
-            "SeasonType": season_type,
-            "Sorter": "DATE",
-        }
-        payload = self.client.get_json(self.league_game_log_url, params=params)
-        headers, rows = self._extract_result_set(payload, "LeagueGameLog")
+        start, end = self._season_date_range(season, season_type, date_from, date_to)
+        expected_type = self._espn_season_type(season_type)
 
-        if "GAME_ID" not in headers:
-            raise ValueError("GAME_ID was not returned by leaguegamelog")
-
-        game_id_index = headers.index("GAME_ID")
-        game_ids = []
+        game_ids: List[str] = []
         seen = set()
-        for row in rows:
-            game_id = str(row[game_id_index])
-            if game_id not in seen:
-                seen.add(game_id)
-                game_ids.append(game_id)
+        current = start
+
+        while current <= end:
+            payload = self.client.get_json(
+                self.scoreboard_url,
+                params={"dates": current.strftime("%Y%m%d")},
+            )
+
+            for event in payload.get("events", []):
+                event_type = event.get("season", {}).get("type")
+                if expected_type is not None and event_type is not None and event_type != expected_type:
+                    continue
+
+                game_id = str(event.get("id") or "")
+                if game_id and game_id not in seen:
+                    seen.add(game_id)
+                    game_ids.append(game_id)
+
+                    if limit is not None and len(game_ids) >= limit:
+                        return game_ids
+
+            current += timedelta(days=1)
+
         return game_ids
 
-    def ingest_scoreboard(self) -> List[str]:
-        games = self.fetch_scoreboard()
+    def ingest_scoreboard(self, game_date: Optional[date] = None) -> List[str]:
+        games = self.fetch_scoreboard(game_date)
         with self.db_manager.get_session() as session:
             for item in games:
                 for prefix in ("home", "away"):
@@ -94,85 +98,146 @@ class NBADataCollector:
         return [item["game_id"] for item in games]
 
     def ingest_boxscore(self, game_id: str) -> int:
-        payload = self.fetch_boxscore(game_id)
-        game = payload.get("game", {})
-        if not game:
-            raise ValueError(f"No game data returned for {game_id}")
+        payload = self.fetch_summary(game_id)
+        competition = self._summary_competition(payload)
+        competitors = competition.get("competitors", [])
 
-        game_id = str(game.get("gameId") or game_id)
-        game_date = self._parse_datetime(game.get("gameTimeUTC") or game.get("gameEt"))
-        home = game.get("homeTeam", {})
-        away = game.get("awayTeam", {})
+        home = next((item for item in competitors if item.get("homeAway") == "home"), None)
+        away = next((item for item in competitors if item.get("homeAway") == "away"), None)
+        if home is None or away is None:
+            raise ValueError(f"Could not find home/away teams for {game_id}")
+
+        game_date = self._parse_datetime(competition.get("date"))
+        game_status = self._normalize_status(
+            competition.get("status", {}).get("type", {}).get("name")
+            or competition.get("status", {}).get("type", {}).get("description")
+        )
+
+        home_team = home.get("team", {})
+        away_team = away.get("team", {})
+        home_team_id = str(home_team.get("id"))
+        away_team_id = str(away_team.get("id"))
+
+        pickcenter = payload.get("pickcenter") or []
+        odds = pickcenter[0] if pickcenter else {}
+        vegas_total = self._float_or_none(odds.get("overUnder"))
+        vegas_spread = self._float_or_none(odds.get("spread"))
 
         with self.db_manager.get_session() as session:
-            for team_data in (home, away):
-                team_id = str(team_data.get("teamId"))
+            for team_data in (home_team, away_team):
+                team_id = str(team_data.get("id"))
                 session.merge(
                     Team(
                         team_id=team_id,
-                        team_name=team_data.get("teamName") or team_data.get("teamCity") or team_id,
-                        abbreviation=team_data.get("teamTricode"),
+                        team_name=team_data.get("displayName")
+                        or team_data.get("shortDisplayName")
+                        or team_data.get("name")
+                        or team_id,
+                        abbreviation=team_data.get("abbreviation"),
                     )
                 )
 
             session.merge(
                 Game(
-                    game_id=game_id,
+                    game_id=str(game_id),
                     date=game_date,
-                    home_team_id=str(home.get("teamId")),
-                    away_team_id=str(away.get("teamId")),
-                    game_status=self._normalize_status(game.get("gameStatusText") or game.get("gameStatus")),
+                    home_team_id=home_team_id,
+                    away_team_id=away_team_id,
+                    game_status=game_status,
                     home_score=self._int_or_none(home.get("score")),
                     away_score=self._int_or_none(away.get("score")),
+                    vegas_total=vegas_total,
+                    vegas_spread=vegas_spread,
                 )
             )
 
             count = 0
-            for team_data in (home, away):
-                team_id = str(team_data.get("teamId"))
-                for player_data in team_data.get("players", []):
-                    player_id = str(player_data.get("personId"))
-                    if not player_id or player_id == "None":
-                        continue
+            seen_players = set()
+            for team_block in payload.get("boxscore", {}).get("players", []):
+                team_data = team_block.get("team", {})
+                team_id = str(team_data.get("id"))
 
-                    name = player_data.get("name") or player_data.get("nameI") or player_id
-                    session.merge(
-                        Player(
+                for stat_group in team_block.get("statistics", []):
+                    keys = stat_group.get("keys") or stat_group.get("labels") or []
+
+                    for athlete_row in stat_group.get("athletes", []):
+                        if athlete_row.get("didNotPlay"):
+                            continue
+
+                        athlete = athlete_row.get("athlete", {})
+                        player_id = str(athlete.get("id") or "")
+                        if not player_id or player_id in seen_players:
+                            continue
+
+                        values = athlete_row.get("stats") or []
+                        if not values:
+                            continue
+
+                        seen_players.add(player_id)
+                        stat_map = {str(key): value for key, value in zip(keys, values)}
+
+                        minutes = self._minutes_to_float(
+                            self._stat_value(stat_map, "minutes", "MIN")
+                        )
+                        field_goals = self._stat_value(
+                            stat_map,
+                            "fieldGoalsMade-fieldGoalsAttempted",
+                            "FG",
+                        )
+                        free_throws = self._stat_value(
+                            stat_map,
+                            "freeThrowsMade-freeThrowsAttempted",
+                            "FT",
+                        )
+                        fga = self._attempts_from_made_attempted(field_goals)
+                        fta = self._attempts_from_made_attempted(free_throws)
+                        turnovers = self._int_or_zero(
+                            self._stat_value(stat_map, "turnovers", "TO")
+                        )
+
+                        position = athlete.get("position") or {}
+                        if isinstance(position, dict):
+                            position = position.get("abbreviation") or position.get("name")
+
+                        session.merge(
+                            Player(
+                                player_id=player_id,
+                                name=athlete.get("displayName")
+                                or athlete.get("shortName")
+                                or player_id,
+                                team_id=team_id,
+                                position=position,
+                            )
+                        )
+
+                        existing = session.scalar(
+                            select(PlayerGameStats).where(
+                                PlayerGameStats.game_id == str(game_id),
+                                PlayerGameStats.player_id == player_id,
+                            )
+                        )
+                        stat_row = existing or PlayerGameStats(
+                            game_id=str(game_id),
                             player_id=player_id,
-                            name=name,
                             team_id=team_id,
-                            position=player_data.get("position"),
                         )
-                    )
-
-                    stats = player_data.get("statistics") or {}
-                    minutes = self._minutes_to_float(stats.get("minutesCalculated") or stats.get("minutes"))
-                    fga = self._int_or_zero(stats.get("fieldGoalsAttempted"))
-                    fta = self._int_or_zero(stats.get("freeThrowsAttempted"))
-                    turnovers = self._int_or_zero(stats.get("turnovers"))
-
-                    existing = session.scalar(
-                        select(PlayerGameStats).where(
-                            PlayerGameStats.game_id == game_id,
-                            PlayerGameStats.player_id == player_id,
+                        stat_row.team_id = team_id
+                        stat_row.minutes_played = minutes
+                        stat_row.points = self._int_or_zero(
+                            self._stat_value(stat_map, "points", "PTS")
                         )
-                    )
-                    stat_row = existing or PlayerGameStats(
-                        game_id=game_id,
-                        player_id=player_id,
-                        team_id=team_id,
-                    )
-                    stat_row.team_id = team_id
-                    stat_row.minutes_played = minutes
-                    stat_row.points = self._int_or_zero(stats.get("points"))
-                    stat_row.assists = self._int_or_zero(stats.get("assists"))
-                    stat_row.rebounds = self._int_or_zero(stats.get("reboundsTotal"))
-                    stat_row.usage_rate = self._activity_proxy(fga, fta, turnovers, minutes)
-                    stat_row.field_goal_attempts = fga
-                    stat_row.free_throw_attempts = fta
-                    stat_row.turnovers = turnovers
-                    session.add(stat_row)
-                    count += 1
+                        stat_row.assists = self._int_or_zero(
+                            self._stat_value(stat_map, "assists", "AST")
+                        )
+                        stat_row.rebounds = self._int_or_zero(
+                            self._stat_value(stat_map, "rebounds", "REB")
+                        )
+                        stat_row.usage_rate = self._activity_proxy(fga, fta, turnovers, minutes)
+                        stat_row.field_goal_attempts = fga
+                        stat_row.free_throw_attempts = fta
+                        stat_row.turnovers = turnovers
+                        session.add(stat_row)
+                        count += 1
 
             return count
 
@@ -184,15 +249,20 @@ class NBADataCollector:
         date_to: Optional[str] = None,
         limit: Optional[int] = None,
     ) -> Dict[str, Any]:
-        game_ids = self.fetch_historical_game_ids(season, season_type, date_from, date_to)
-        if limit is not None:
-            game_ids = game_ids[:limit]
+        game_ids = self.fetch_historical_game_ids(
+            season,
+            season_type,
+            date_from,
+            date_to,
+            limit=limit,
+        )
 
         games_ingested = 0
         player_rows = 0
         failures = []
 
-        for game_id in game_ids:
+        for index, game_id in enumerate(game_ids, start=1):
+            print(f"Fetching game {index}/{len(game_ids)}: {game_id}")
             try:
                 player_rows += self.ingest_boxscore(game_id)
                 games_ingested += 1
@@ -207,55 +277,108 @@ class NBADataCollector:
         }
 
     @staticmethod
-    def _extract_result_set(payload: Dict[str, Any], name: str):
-        result_sets = payload.get("resultSets")
-        if result_sets is None:
-            result_sets = payload.get("resultSet")
-
-        if isinstance(result_sets, dict):
-            result_sets = [result_sets]
-        if not isinstance(result_sets, list):
-            raise ValueError("NBA stats response did not contain a result set")
-
-        for result in result_sets:
-            if result.get("name") == name or len(result_sets) == 1:
-                return result.get("headers", []), result.get("rowSet", [])
-
-        raise ValueError(f"Result set '{name}' was not returned")
+    def _summary_competition(payload: Dict[str, Any]) -> Dict[str, Any]:
+        competitions = payload.get("header", {}).get("competitions", [])
+        if not competitions:
+            raise ValueError("ESPN summary did not contain competition data")
+        return competitions[0]
 
     @staticmethod
-    def _parse_scoreboard_game(game: Dict[str, Any]) -> Dict[str, Any]:
-        home = game.get("homeTeam", {})
-        away = game.get("awayTeam", {})
+    def _parse_scoreboard_event(event: Dict[str, Any]) -> Dict[str, Any]:
+        competitions = event.get("competitions", [])
+        if not competitions:
+            raise ValueError("ESPN scoreboard event did not contain competition data")
+        competition = competitions[0]
+        competitors = competition.get("competitors", [])
+
+        home = next((item for item in competitors if item.get("homeAway") == "home"), {})
+        away = next((item for item in competitors if item.get("homeAway") == "away"), {})
+        home_team = home.get("team", {})
+        away_team = away.get("team", {})
+
         return {
-            "game_id": str(game.get("gameId")),
-            "date": NBADataCollector._parse_datetime(game.get("gameTimeUTC") or game.get("gameEt")),
-            "game_status": NBADataCollector._normalize_status(game.get("gameStatusText") or game.get("gameStatus")),
-            "home_team_id": str(home.get("teamId")),
-            "home_team_name": home.get("teamName") or home.get("teamCity") or str(home.get("teamId")),
-            "home_team_abbreviation": home.get("teamTricode"),
+            "game_id": str(event.get("id")),
+            "date": NBADataCollector._parse_datetime(event.get("date") or competition.get("date")),
+            "game_status": NBADataCollector._normalize_status(
+                competition.get("status", {}).get("type", {}).get("name")
+                or event.get("status", {}).get("type", {}).get("name")
+            ),
+            "home_team_id": str(home_team.get("id")),
+            "home_team_name": home_team.get("displayName")
+            or home_team.get("shortDisplayName")
+            or home_team.get("name")
+            or str(home_team.get("id")),
+            "home_team_abbreviation": home_team.get("abbreviation"),
             "home_score": NBADataCollector._int_or_none(home.get("score")),
-            "away_team_id": str(away.get("teamId")),
-            "away_team_name": away.get("teamName") or away.get("teamCity") or str(away.get("teamId")),
-            "away_team_abbreviation": away.get("teamTricode"),
+            "away_team_id": str(away_team.get("id")),
+            "away_team_name": away_team.get("displayName")
+            or away_team.get("shortDisplayName")
+            or away_team.get("name")
+            or str(away_team.get("id")),
+            "away_team_abbreviation": away_team.get("abbreviation"),
             "away_score": NBADataCollector._int_or_none(away.get("score")),
         }
 
     @staticmethod
+    def _season_date_range(
+        season: str,
+        season_type: str,
+        date_from: Optional[str],
+        date_to: Optional[str],
+    ) -> tuple[date, date]:
+        start_year = int(season.split("-", 1)[0])
+        end_year = start_year + 1
+        season_type_lower = season_type.strip().lower()
+
+        if season_type_lower in {"preseason", "pre-season"}:
+            default_start = date(start_year, 9, 20)
+            default_end = date(start_year, 10, 25)
+        elif season_type_lower in {"postseason", "playoffs", "post-season"}:
+            default_start = date(end_year, 4, 10)
+            default_end = date(end_year, 6, 30)
+        else:
+            default_start = date(start_year, 10, 15)
+            default_end = date(end_year, 4, 20)
+
+        start = NBADataCollector._parse_input_date(date_from) if date_from else default_start
+        end = NBADataCollector._parse_input_date(date_to) if date_to else default_end
+        return start, end
+
+    @staticmethod
+    def _espn_season_type(season_type: str) -> Optional[int]:
+        normalized = season_type.strip().lower()
+        if normalized in {"preseason", "pre-season"}:
+            return 1
+        if normalized in {"regular season", "regular-season", "regular"}:
+            return 2
+        if normalized in {"postseason", "playoffs", "post-season"}:
+            return 3
+        return None
+
+    @staticmethod
+    def _parse_input_date(value: str) -> date:
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(value, fmt).date()
+            except ValueError:
+                continue
+        raise ValueError(f"Unsupported date format: {value}")
+
+    @staticmethod
     def _normalize_status(value: Any) -> str:
         text = str(value or "unknown").strip().lower()
-        if text in {"3", "final", "final/ot", "final/2ot", "final/3ot"} or text.startswith("final"):
+        if "final" in text or text in {"3", "status_post"}:
             return "final"
-        if text in {"1", "scheduled"}:
+        if "scheduled" in text or "pre" in text or text in {"1", "status_scheduled"}:
             return "scheduled"
-        if text in {"2", "live", "in progress"}:
+        if "progress" in text or "live" in text or text in {"2", "status_in_progress"}:
             return "live"
         return text
 
     @staticmethod
     def _parse_datetime(value: Any) -> datetime:
         if not value:
-            raise ValueError("Game time was missing from NBA response")
+            raise ValueError("Game time was missing from ESPN response")
         text = str(value).replace("Z", "+00:00")
         return datetime.fromisoformat(text)
 
@@ -264,18 +387,6 @@ class NBADataCollector:
         if value in (None, ""):
             return 0.0
         text = str(value)
-        if text.startswith("PT") and text.endswith("M"):
-            try:
-                return float(text[2:-1])
-            except ValueError:
-                return 0.0
-        if text.startswith("PT") and "M" in text:
-            try:
-                minute_part = text[2:].split("M", 1)[0]
-                second_part = text.split("M", 1)[1].replace("S", "")
-                return float(minute_part) + (float(second_part) / 60.0 if second_part else 0.0)
-            except ValueError:
-                return 0.0
         if ":" in text:
             minutes, seconds = text.split(":", 1)
             try:
@@ -286,6 +397,25 @@ class NBADataCollector:
             return float(text)
         except ValueError:
             return 0.0
+
+    @staticmethod
+    def _stat_value(stat_map: Dict[str, Any], *keys: str) -> Any:
+        for key in keys:
+            if key in stat_map:
+                return stat_map[key]
+        return None
+
+    @staticmethod
+    def _attempts_from_made_attempted(value: Any) -> int:
+        if value in (None, ""):
+            return 0
+        text = str(value)
+        if "-" in text:
+            try:
+                return int(float(text.rsplit("-", 1)[1]))
+            except ValueError:
+                return 0
+        return 0
 
     @staticmethod
     def _int_or_zero(value: Any) -> int:
@@ -300,6 +430,15 @@ class NBADataCollector:
             return None
         try:
             return int(float(value))
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _float_or_none(value: Any):
+        if value in (None, ""):
+            return None
+        try:
+            return float(value)
         except (TypeError, ValueError):
             return None
 

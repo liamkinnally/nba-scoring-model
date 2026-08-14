@@ -4,7 +4,7 @@ Python project for predicting NBA player points, assists, and rebounds using rec
 
 ## What it does
 
-- Pulls NBA game and box score data from NBA-hosted endpoints
+- Pulls NBA schedules and box score data from ESPN JSON endpoints
 - Stores games, teams, players, and player box scores in SQLite with SQLAlchemy
 - Builds rolling player and matchup features
 - Trains Gradient Boosting regression models for points, assists, and rebounds
@@ -30,17 +30,14 @@ nba-scoring-model/
 
 ## Data
 
-The project uses NBA-hosted JSON endpoints for live scoreboard and box score data. Historical game IDs are pulled from the NBA stats `leaguegamelog` endpoint and then matched to the NBA live-data box score endpoint.
-
-The main endpoints used are:
+The ingestion pipeline uses ESPN's NBA scoreboard endpoint to find games by date and the ESPN game summary endpoint to collect box score data.
 
 ```text
-https://cdn.nba.com/static/json/liveData/scoreboard/todaysScoreboard_00.json
-https://cdn.nba.com/static/json/liveData/boxscore/boxscore_{game_id}.json
-https://stats.nba.com/stats/leaguegamelog
+https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard
+https://site.api.espn.com/apis/site/v2/sports/basketball/nba/summary
 ```
 
-These endpoints are hosted by NBA.com but are not a documented public API, so their response format or availability can change.
+These endpoints are not a documented public API, so their response format or availability can change.
 
 ## Setup
 
@@ -58,16 +55,19 @@ For example, to load the 2025-26 regular season:
 python -m nba_scoring_model.cli ingest-season --season 2025-26
 ```
 
-You can test the ingestion with only a few games first:
+You can test ingestion with only a few games first:
 
 ```bash
 python -m nba_scoring_model.cli ingest-season --season 2025-26 --limit 10
 ```
 
-To ingest today's games:
+Or limit the date range:
 
 ```bash
-python -m nba_scoring_model.cli ingest-today --include-boxscores
+python -m nba_scoring_model.cli ingest-season \
+  --season 2025-26 \
+  --start 2025-10-21 \
+  --end 2025-10-31
 ```
 
 ## Train the models
@@ -103,8 +103,6 @@ There is also an offline demo that fills the database with generated data and ru
 ```bash
 python -m nba_scoring_model.cli demo
 ```
-
-This is mainly for checking that the pipeline runs without needing to download NBA data first.
 
 ## Tests
 
