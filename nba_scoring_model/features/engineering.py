@@ -1,9 +1,8 @@
-
 from datetime import datetime
 from typing import Dict, Optional
 
 import numpy as np
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from nba_scoring_model.data.database import DatabaseManager
@@ -66,7 +65,11 @@ class FeatureEngineer:
             session.execute(
                 select(PlayerGameStats, Game)
                 .join(Game, PlayerGameStats.game_id == Game.game_id)
-                .where(PlayerGameStats.player_id == player_id, PlayerGameStats.minutes_played > 0, Game.date < as_of)
+                .where(
+                    PlayerGameStats.player_id == player_id,
+                    PlayerGameStats.minutes_played > 0,
+                    Game.date < as_of,
+                )
                 .order_by(Game.date.desc())
             ).all()
         )
@@ -101,7 +104,9 @@ class FeatureEngineer:
                 select(PlayerGameStats, Game)
                 .join(Game, PlayerGameStats.game_id == Game.game_id)
                 .where(
-                    PlayerGameStats.player_id == player_id, PlayerGameStats.minutes_played > 0,
+                    PlayerGameStats.player_id == player_id,
+                    PlayerGameStats.minutes_played > 0,
+                    PlayerGameStats.team_id != opponent_id,
                     Game.date < as_of,
                     or_(Game.home_team_id == opponent_id, Game.away_team_id == opponent_id),
                 )
@@ -138,7 +143,7 @@ class FeatureEngineer:
                 "team_points_for_avg_10": np.nan,
                 "team_points_against_avg_10": np.nan,
                 "team_recent_win_pct_10": np.nan,
-                "team_pace_proxy_10": np.nan,
+                "team_scoring_environment_10": np.nan,
             }
 
         points_for = []
@@ -160,14 +165,18 @@ class FeatureEngineer:
             "team_points_for_avg_10": float(np.mean(points_for)) if points_for else np.nan,
             "team_points_against_avg_10": float(np.mean(points_against)) if points_against else np.nan,
             "team_recent_win_pct_10": float(np.mean(wins)) if wins else np.nan,
-            "team_pace_proxy_10": float(np.mean(totals) / 2.0) if totals else np.nan,
+            "team_scoring_environment_10": float(np.mean(totals) / 2.0) if totals else np.nan,
         }
 
     def _schedule_features(self, session: Session, player_id: str, as_of: datetime) -> Dict[str, float]:
         prev_date = session.scalar(
             select(Game.date)
             .join(PlayerGameStats, PlayerGameStats.game_id == Game.game_id)
-            .where(PlayerGameStats.player_id == player_id, PlayerGameStats.minutes_played > 0, Game.date < as_of)
+            .where(
+                PlayerGameStats.player_id == player_id,
+                PlayerGameStats.minutes_played > 0,
+                Game.date < as_of,
+            )
             .order_by(Game.date.desc())
             .limit(1)
         )

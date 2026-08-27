@@ -1,4 +1,3 @@
-
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -194,7 +193,18 @@ class PlayerStatModel:
     def predict(self, features: Dict[str, float]) -> float:
         if self.pipeline is None:
             raise RuntimeError("Model has not been trained or loaded")
-        X = pd.DataFrame([{name: features.get(name, np.nan) for name in self.feature_columns}])
+
+        prediction_features = dict(features)
+        if (
+            "team_pace_proxy_10" in self.feature_columns
+            and "team_pace_proxy_10" not in prediction_features
+            and "team_scoring_environment_10" in prediction_features
+        ):
+            prediction_features["team_pace_proxy_10"] = prediction_features["team_scoring_environment_10"]
+
+        X = pd.DataFrame(
+            [{name: prediction_features.get(name, np.nan) for name in self.feature_columns}]
+        )
         return float(self.pipeline.predict(X)[0])
 
     def save(self, metadata: Dict[str, object]) -> Path:

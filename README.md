@@ -44,7 +44,7 @@ Current features include:
 - Recent performance against the opponent
 - Team scoring and defensive form
 - Recent team win percentage
-- Team pace proxy
+- Team scoring-environment proxy
 - Rest days and back-to-back indicator
 - Home/away status
 - Game betting total
