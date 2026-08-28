@@ -35,21 +35,29 @@ Evaluation used the 2025-26 NBA regular season:
 
 The tuned models have slightly lower reported error than the 10-game baseline for points and assists. Rebounds are tied on MAE while the model has lower RMSE and higher R².
 
-The rolling baselines contain 5,612 holdout observations because players without prior game history cannot receive a recent-average prediction. Direct head-to-head reporting uses only rows where both methods can make a prediction.
+The model metrics above use all 5,645 holdout observations. The rolling baselines contain 5,612 observations because players without prior game history cannot receive a recent-average prediction. Direct head-to-head reporting therefore uses only rows where both methods can make a prediction.
 
 ### Holdout prediction quality
 
 ![Holdout actual vs. predicted](reports/figures/prediction_quality.png)
 
-The chronological holdout contains 5,645 player-game observations. The models capture a meaningful share of game-to-game variation, while the parity and residual diagnostics also show regression toward the mean at extreme performances.
+The chronological holdout contains 5,645 player-game observations. The parity plots show useful predictive signal alongside a clear tendency for predictions to compress toward typical outcomes rather than match extreme performances.
 
 ### Model vs. rolling baseline
 
 ![Trailing 7-day holdout MAE](reports/figures/rolling_mae.png)
 
-For a direct comparison, both methods are evaluated on the same 5,612 holdout observations. The chart reports row-weighted trailing 7-calendar-day MAE and excludes incomplete opening windows.
+For an apples-to-apples comparison, both methods were evaluated on the same 5,612 holdout observations:
 
-Across 28 complete windows, the Gradient Boosting model produced lower MAE than the Last-10 baseline in **23 of 28 windows for points** and **22 of 28 for assists**. Rebounds were effectively tied, with the model lower in 15 of 28 windows.
+| Target | Model MAE | Last-10 MAE |
+|---|---:|---:|
+| Points | **4.841** | 4.883 |
+| Assists | **1.407** | 1.417 |
+| Rebounds | **1.930** | 1.932 |
+
+The chart reports row-weighted trailing 7-calendar-day MAE and excludes incomplete opening windows. Across 28 complete windows, the Gradient Boosting model produced lower MAE than the Last-10 baseline in **23 of 28 windows for points** and **22 of 28 for assists**. Rebounds were effectively tied, with the model lower in 15 of 28 windows.
+
+For points, the model's relative MAE advantage also increased with prior scoring level, from **0.23% for players below 8 PPG** to **1.81% for players averaging 22+ PPG**. Full tier results are available in `reports/data/tier_analysis.csv`.
 
 ### Model interpretability
 
@@ -62,6 +70,12 @@ Holdout permutation importance identifies the player's 10-game scoring average a
 Partial dependence shows the model increasing expected scoring strongly with recent scoring level and more gradually with recent playing time. These plots describe the fitted model's average behavior and should not be interpreted as causal effects.
 
 Additional residual diagnostics and permutation-importance plots for assists and rebounds are available in `reports/figures/`.
+
+### Error analysis
+
+The points model shows clear regression toward the mean on extreme performances. Although **53.3% of point predictions are above the actual result**, the mean residual (`actual - predicted`) is still **+0.38 points** because the largest misses tend to come from underpredicting high-scoring games.
+
+Among **188 holdout performances of 30+ points, all 188 were underpredicted**, with an average underprediction of **13.9 points**. The model's highest point prediction was **31.7**, while the highest observed outcome was **60**. This indicates that the model is substantially better at estimating typical player output than anticipating extreme ceiling games.
 
 ## Features
 
