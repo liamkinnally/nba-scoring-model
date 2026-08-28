@@ -1,5 +1,7 @@
 # NBA Player Stat Prediction
 
+[![CI](https://github.com/liamkinnally/nba-scoring-model/actions/workflows/ci.yml/badge.svg)](https://github.com/liamkinnally/nba-scoring-model/actions/workflows/ci.yml)
+
 Python project for predicting NBA player points, assists, and rebounds using historical box scores, recent performance, opponent history, team form, rest, home/away status, and betting-market data.
 
 ## What it does
