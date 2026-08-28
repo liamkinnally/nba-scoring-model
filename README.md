@@ -37,6 +37,32 @@ The tuned models have slightly lower reported error than the 10-game baseline fo
 
 The rolling baselines contain 5,612 holdout observations because players without prior game history cannot receive a recent-average prediction. Direct head-to-head reporting uses only rows where both methods can make a prediction.
 
+### Holdout prediction quality
+
+![Holdout actual vs. predicted](reports/figures/prediction_quality.png)
+
+The chronological holdout contains 5,645 player-game observations. The models capture a meaningful share of game-to-game variation, while the parity and residual diagnostics also show regression toward the mean at extreme performances.
+
+### Model vs. rolling baseline
+
+![Trailing 7-day holdout MAE](reports/figures/rolling_mae.png)
+
+For a direct comparison, both methods are evaluated on the same 5,612 holdout observations. The chart reports row-weighted trailing 7-calendar-day MAE and excludes incomplete opening windows.
+
+Across 28 complete windows, the Gradient Boosting model produced lower MAE than the Last-10 baseline in **23 of 28 windows for points** and **22 of 28 for assists**. Rebounds were effectively tied, with the model lower in 15 of 28 windows.
+
+### Model interpretability
+
+![Points permutation importance](reports/figures/permutation_importance_points.png)
+
+Holdout permutation importance identifies the player's 10-game scoring average as the dominant feature for points prediction, with recent minutes providing the strongest secondary contribution. Because several rolling features are correlated, permutation importance should be interpreted as the value of each feature given the others rather than as a complete measure of the underlying concept's importance.
+
+![Points partial dependence](reports/figures/partial_dependence_points.png)
+
+Partial dependence shows the model increasing expected scoring strongly with recent scoring level and more gradually with recent playing time. These plots describe the fitted model's average behavior and should not be interpreted as causal effects.
+
+Additional residual diagnostics and permutation-importance plots for assists and rebounds are available in `reports/figures/`.
+
 ## Features
 
 Current features include:
