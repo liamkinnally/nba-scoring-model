@@ -21,3 +21,6 @@ artifacts/models/
 .vscode/
 .idea/
 .venvsource/
+
+# Report cache (regenerable, local only)
+reports/cache/

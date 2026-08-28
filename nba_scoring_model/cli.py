@@ -9,6 +9,7 @@ from nba_scoring_model.data.database import DatabaseManager
 from nba_scoring_model.data.demo import seed_demo_database
 from nba_scoring_model.modeling.trainer import ModelTrainer
 from nba_scoring_model.modeling.evaluation import evaluate_recent_average_baselines
+from nba_scoring_model.reporting import generate_report
 
 
 def parse_date(value: str) -> datetime:
@@ -76,6 +77,26 @@ def main():
     evaluate_baselines.add_argument("--start", required=True, type=parse_date)
     evaluate_baselines.add_argument("--end", required=True, type=parse_date)
 
+    report = subparsers.add_parser(
+        "report",
+        help="Generate evaluation figures and reporting CSVs from saved models",
+    )
+    report.add_argument("--database-url", default=config.DATABASE_URL)
+    report.add_argument("--model-dir", default=str(config.MODEL_DIR))
+    report.add_argument(
+        "--start",
+        type=parse_date,
+        help="Required only for older saved models without evaluation-window metadata",
+    )
+    report.add_argument(
+        "--end",
+        type=parse_date,
+        help="Required only for older saved models without evaluation-window metadata",
+    )
+    report.add_argument("--output-dir", default="reports")
+    report.add_argument("--refresh-cache", action="store_true")
+    report.add_argument("--dpi", type=int, default=170)
+
     args = parser.parse_args()
 
     if args.command == "demo":
@@ -109,6 +130,18 @@ def main():
             db,
             args.start,
             args.end,
+        )
+
+    elif args.command == "report":
+        db = DatabaseManager(args.database_url)
+        output = generate_report(
+            db,
+            model_dir=args.model_dir,
+            start=args.start,
+            end=args.end,
+            output_dir=args.output_dir,
+            refresh_cache=args.refresh_cache,
+            dpi=args.dpi,
         )
 
     else:
