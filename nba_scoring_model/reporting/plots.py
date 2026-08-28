@@ -19,6 +19,29 @@ MODEL_COLOR = "#0173B2"
 BASELINE_COLOR = "#DE8F05"
 REFERENCE_GREY = "#666666"
 
+FEATURE_LABELS = {
+    "points_avg_5": "Points average (last 5)",
+    "points_avg_10": "Points average (last 10)",
+    "assists_avg_5": "Assists average (last 5)",
+    "assists_avg_10": "Assists average (last 10)",
+    "rebounds_avg_5": "Rebounds average (last 5)",
+    "rebounds_avg_10": "Rebounds average (last 10)",
+    "minutes_avg_5": "Minutes average (last 5)",
+    "activity_proxy_avg_5": "Activity proxy (last 5)",
+    "vs_opponent_points_avg_5": "Points vs. opponent (last 5)",
+    "vs_opponent_assists_avg_5": "Assists vs. opponent (last 5)",
+    "vs_opponent_rebounds_avg_5": "Rebounds vs. opponent (last 5)",
+    "team_points_for_avg_10": "Team points for (last 10)",
+    "team_points_against_avg_10": "Team points against (last 10)",
+    "team_recent_win_pct_10": "Team win percentage (last 10)",
+    "team_pace_proxy_10": "Team pace proxy (last 10)",
+    "days_rest": "Days rest",
+    "is_back_to_back": "Back-to-back",
+    "is_home_game": "Home game",
+    "vegas_total": "Vegas total",
+    "vegas_spread": "Vegas spread",
+}
+
 STYLE = {
     "figure.facecolor": "white",
     "savefig.facecolor": "white",
@@ -36,6 +59,10 @@ STYLE = {
     "axes.axisbelow": True,
     "lines.linewidth": 1.8,
 }
+
+
+def _feature_label(feature: str) -> str:
+    return FEATURE_LABELS.get(feature, feature.replace("_", " ").title())
 
 
 def _save(fig, path: Path, dpi: int) -> Path:
@@ -161,17 +188,23 @@ def plot_permutation_importance(
     importance: pd.DataFrame, target: str, path: Path, *, dpi: int = 170
 ) -> Path:
     """Horizontal-bar holdout permutation importance with repeat error bars."""
-    sub = importance[importance["target"] == target].sort_values("mae_increase_mean")
+    sub = (
+        importance[importance["target"] == target]
+        .nlargest(10, "mae_increase_mean")
+        .sort_values("mae_increase_mean")
+        .copy()
+    )
+    sub["feature_label"] = sub["feature"].map(_feature_label)
     with plt.rc_context(STYLE):
         fig, ax = plt.subplots(figsize=(7.5, 5.2))
         ax.barh(
-            sub["feature"], sub["mae_increase_mean"],
+            sub["feature_label"], sub["mae_increase_mean"],
             xerr=sub["mae_increase_std"],
             color=MODEL_COLOR,
             error_kw=dict(ecolor="#444444", lw=1.0, capsize=2),
         )
         ax.set_xlabel("Increase in holdout MAE when feature is shuffled")
-        ax.set_title(f"Permutation importance - {target} model (holdout)")
+        ax.set_title(f"Permutation importance - {target.capitalize()} model (holdout)")
         ax.grid(axis="x")
         ax.grid(False, axis="y")
         fig.tight_layout()
@@ -198,8 +231,9 @@ def plot_partial_dependence(
             ax=axes_list,
             line_kw={"color": MODEL_COLOR},
         )
-        for ax in axes_list:
+        for ax, feature in zip(axes_list, features):
             ax.set_title("")
+            ax.set_xlabel(_feature_label(feature))
         fig.suptitle("Partial dependence - points model", y=1.0)
         fig.tight_layout()
         return _save(fig, path, dpi)
