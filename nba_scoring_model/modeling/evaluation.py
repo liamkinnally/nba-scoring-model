@@ -9,6 +9,7 @@ from sqlalchemy import select
 from nba_scoring_model.data.database import DatabaseManager
 from nba_scoring_model.data.models import Game, PlayerGameStats
 from nba_scoring_model.modeling.base import PlayerStatModel
+from nba_scoring_model.modeling.baselines import add_rolling_baseline_columns, baseline_column
 
 
 def evaluate_recent_average_baselines(
@@ -51,20 +52,7 @@ def evaluate_recent_average_baselines(
     if frame.empty:
         raise ValueError("No rows found for the requested date range")
 
-    frame = frame.sort_values(
-        ["date", "game_id", "player_id"]
-    ).reset_index(drop=True)
-
-    for target in ("points", "assists", "rebounds"):
-        for window in (5, 10):
-            frame[f"{target}_avg_{window}"] = (
-                frame.groupby("player_id")[target]
-                .transform(
-                    lambda values: values.shift(1)
-                    .rolling(window, min_periods=1)
-                    .mean()
-                )
-            )
+    frame = add_rolling_baseline_columns(frame, windows=(5, 10))
 
     _, test_frame = PlayerStatModel.chronological_holdout(frame)
 
@@ -79,7 +67,7 @@ def evaluate_recent_average_baselines(
         target_results = {}
 
         for window in (5, 10):
-            prediction_column = f"{target}_avg_{window}"
+            prediction_column = baseline_column(target, window)
             valid = test_frame[[target, prediction_column]].dropna()
 
             actual = valid[target]

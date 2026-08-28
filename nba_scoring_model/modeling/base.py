@@ -2,7 +2,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import joblib
 import numpy as np
@@ -12,11 +12,10 @@ from sklearn.impute import SimpleImputer
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import Pipeline
-from sqlalchemy import select
 
 from nba_scoring_model.data.database import DatabaseManager
-from nba_scoring_model.data.models import Game, PlayerGameStats
 from nba_scoring_model.features.engineering import FeatureEngineer
+from nba_scoring_model.modeling.frames import build_feature_frame
 
 
 @dataclass
@@ -52,41 +51,13 @@ class PlayerStatModel:
         self.feature_columns: List[str] = []
 
     def prepare_training_frame(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
-        with self.db_manager.get_session() as session:
-            rows = list(
-                session.execute(
-                    select(PlayerGameStats, Game)
-                    .join(Game, PlayerGameStats.game_id == Game.game_id)
-                    .where(
-                        Game.date >= start_date,
-                        Game.date <= end_date,
-                        PlayerGameStats.minutes_played > 0,
-                    )
-                    .order_by(Game.date.asc(), Game.game_id.asc(), PlayerGameStats.player_id.asc())
-                ).all()
-            )
-
-        records = []
-        for stat, game in rows:
-            features = self.feature_engineer.generate_player_features(
-                stat.player_id,
-                game.game_id,
-                team_id=stat.team_id,
-            )
-            records.append(
-                {
-                    "date": game.date,
-                    "game_id": game.game_id,
-                    "player_id": stat.player_id,
-                    self.target: float(getattr(stat, self.target)),
-                    **features,
-                }
-            )
-
-        frame = pd.DataFrame(records)
-        if frame.empty:
-            raise ValueError("No training rows found for the requested date range")
-        return frame.sort_values(["date", "game_id", "player_id"]).reset_index(drop=True)
+        return build_feature_frame(
+            self.db_manager,
+            self.feature_engineer,
+            start_date,
+            end_date,
+            targets=(self.target,),
+        )
 
     @staticmethod
     def chronological_holdout(frame: pd.DataFrame, test_fraction: float = 0.2) -> Tuple[pd.DataFrame, pd.DataFrame]:
@@ -176,6 +147,10 @@ class PlayerStatModel:
                 "feature_columns": self.feature_columns,
                 "best_params": best_params,
                 "trained_through": str(pd.to_datetime(train_frame["date"]).max()),
+                # Store the evaluation window so reports can reproduce this split.
+                "frame_start": str(pd.to_datetime(frame["date"]).min()),
+                "frame_end": str(pd.to_datetime(frame["date"]).max()),
+                "holdout_cutoff": str(pd.to_datetime(test_frame["date"]).min().normalize().date()),
             }
         )
         return TrainingResult(
