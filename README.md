@@ -73,9 +73,9 @@ Additional residual diagnostics and permutation-importance plots for assists and
 
 ### Error analysis
 
-The points model shows clear regression toward the mean on extreme performances. Although **53.3% of point predictions are above the actual result**, the mean residual (`actual - predicted`) is still **+0.38 points** because the largest misses tend to come from underpredicting high-scoring games.
+The points model shows clear regression toward the mean on extreme performances. Although 53.3% of point predictions are above the actual result, the mean residual (`actual - predicted`) is still +0.38 points because the largest misses tend to come from underpredicting high-scoring games.
 
-Among **188 holdout performances of 30+ points, all 188 were underpredicted**, with an average underprediction of **13.9 points**. The model's highest point prediction was **31.7**, while the highest observed outcome was **60**. This indicates that the model is substantially better at estimating typical player output than anticipating extreme ceiling games.
+Among 188 holdout performances of 30+ points, all 188 were underpredicted, with an average underprediction of 13.9 points. The model's highest point prediction was 31.7, while the highest observed outcome was 60. This indicates that the model is substantially better at estimating typical player output than anticipating extreme ceiling games.
 
 ## Features
 
